@@ -1,0 +1,57 @@
+# Android generated files
+android/local.properties
+android/app/local.properties
+android/app/src/main/assets/
+android/.gradle/
+android/gradlew
+android/gradlew.bat
+android/**/gradle-wrapper.jar
+
+# Android build outputs
+android/app/build/
+android/build/
+*.apk
+*.aab
+*.dex
+*.class
+
+# Android IDE files
+*.iml
+.idea/
+.DS_Store
+
+# Android keystore
+*.jks
+*.keystore
+android/app/keystore.properties
+android/key.properties
+
+# Firebase config (sensitive)
+android/app/google-services.json
+GoogleService-Info.plist
+
+# Environment variables
+.env
+.env.local
+keys.dart
+secrets.dart
+
+# Flutter/Dart generated
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+
+# Version control
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# Test coverage
+coverage/
+*.lcov

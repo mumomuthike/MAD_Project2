@@ -26,7 +26,7 @@ android/build/
 android/app/keystore.properties
 android/key.properties
 
-# Firebase config (sensitive)
+# Firebase config
 android/app/google-services.json
 GoogleService-Info.plist
 
@@ -44,6 +44,12 @@ secrets.dart
 .pub-cache/
 .pub/
 /build/
+
+# Flutter platform-specific generated files
+linux/flutter/generated_plugins.cmake
+macos/Flutter/GeneratedPluginRegistrant.swift
+windows/flutter/generated_plugin_registrant.cc
+windows/flutter/generated_plugins.cmake
 
 # Version control
 *.log

@@ -21,7 +21,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _navigate() async {
     // Brief splash delay for branding
-    await Future.delayed(const Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 5));
 
     if (!mounted) return;
 
@@ -60,7 +60,7 @@ class _SplashScreenState extends State<SplashScreen> {
             const SizedBox(height: 8),
             const Text(
               'music, together',
-              style: TextStyle(fontSize: 14, color: Colors.white38),
+              style: TextStyle(fontSize: 14, color: Colors.white),
             ),
             const SizedBox(height: 48),
             const CircularProgressIndicator(),

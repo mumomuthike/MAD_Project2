@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'profile_screen.dart';
+import 'session_screen.dart';
 
 // HomeScreen — create/join session and view recent sessions
 class HomeScreen extends StatefulWidget {
@@ -89,11 +90,30 @@ class _LobbyTabState extends State<_LobbyTab> {
   }
 
   void _createSession() {
-    // TODO: write Firestore session document and navigate to PlaylistScreen
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CreateSessionSheet(
+        onCreated: (name, moods) {
+          // TODO: write Firestore session document before navigating
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SessionScreen(
+                sessionName: name,
+                moods: moods,
+                isHost: true,
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _joinSession() {
-    // TODO: look up Firestore session by code and navigate to PlaylistScreen
+    // TODO: look up Firestore session by code and navigate to SessionScreen
   }
 
   @override
@@ -461,6 +481,176 @@ class _RecentSessionTile extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+// Create session bottom sheet
+class _CreateSessionSheet extends StatefulWidget {
+  final void Function(String name, List<String> moods) onCreated;
+  const _CreateSessionSheet({required this.onCreated});
+
+  @override
+  State<_CreateSessionSheet> createState() => _CreateSessionSheetState();
+}
+
+class _CreateSessionSheetState extends State<_CreateSessionSheet> {
+  final _nameController = TextEditingController();
+  final _nameFocus = FocusNode();
+  final Set<String> _selectedMoods = {};
+
+  static const _moods = [
+    ('🔥', 'Hype'),
+    ('😌', 'Chill'),
+    ('💃', 'Party'),
+    ('📚', 'Focus'),
+    ('💔', 'Sad'),
+    ('🌙', 'Late Night'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-focus name field after sheet animates in
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _nameFocus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _nameFocus.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      _nameFocus.requestFocus();
+      return;
+    }
+    // TODO: write Firestore session document here
+    Navigator.pop(context);
+    widget.onCreated(name, _selectedMoods.toList());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + bottomInset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Handle bar
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Title
+          const Text(
+            'New Session',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Give your session a name and set the vibe.',
+            style: TextStyle(fontSize: 13, color: Colors.white60),
+          ),
+          const SizedBox(height: 24),
+
+          // Session name field
+          TextField(
+            controller: _nameController,
+            focusNode: _nameFocus,
+            decoration: const InputDecoration(
+              hintText: 'Session name',
+              prefixIcon: Icon(Icons.edit_rounded, color: Colors.white60, size: 20),
+            ),
+            style: const TextStyle(color: Colors.white),
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 24),
+
+          // Mood tags
+          const Text(
+            'MOOD TAGS',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: Colors.white60,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: _moods.map((m) {
+              final selected = _selectedMoods.contains(m.$2);
+              return GestureDetector(
+                onTap: () => setState(() {
+                  selected ? _selectedMoods.remove(m.$2) : _selectedMoods.add(m.$2);
+                }),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? primary.withOpacity(0.2)
+                        : Theme.of(context).colorScheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(
+                      color: selected ? primary : Colors.transparent,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Text(
+                    '${m.$1}  ${m.$2}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: selected ? primary : Colors.white70,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 28),
+
+          // Create button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _submit,
+              child: const Text('Create Session'),
+            ),
+          ),
+        ],
       ),
     );
   }

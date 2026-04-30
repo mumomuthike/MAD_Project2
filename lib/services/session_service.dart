@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/session.dart';
+import '../models/Session.dart';
 
 // Handles Session related Firestore operations
 class SessionService {

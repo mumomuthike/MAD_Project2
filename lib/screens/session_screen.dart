@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'home_screen.dart';
 
 // SessionScreen — users can view and add to the queue and vote on songs / chat
 class SessionScreen extends StatefulWidget {
@@ -68,7 +68,14 @@ class _SessionScreenState extends State<SessionScreen> {
         ],
       ),
     );
-    return confirmed ?? false;
+    if (confirmed == true && mounted) { // return to HomeScreen when session is abandoned
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+            (_) => false,
+      );
+    }
+    return false;
   }
 
   @override
@@ -97,9 +104,7 @@ class _SessionScreenState extends State<SessionScreen> {
                 ),
             ],
           ),
-          leading: BackButton(onPressed: () async {
-            if (await _onWillPop()) Navigator.pop(context);
-          }),
+          leading: BackButton(onPressed: () => _onWillPop()),
           actions: [
             // Session code chip — tap to copy
             GestureDetector(

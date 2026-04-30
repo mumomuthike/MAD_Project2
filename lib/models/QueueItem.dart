@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Firestore path: /sessions/{sessionId}/queue/{queueItemId}
 class QueueItem {
   final String id;
   final String addedByUid;
@@ -29,6 +30,7 @@ class QueueItem {
     required this.position,
   });
 
+  // Build a QueueItem from a Firestore document snapshot
   factory QueueItem.fromDoc(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return QueueItem(
@@ -47,6 +49,7 @@ class QueueItem {
     );
   }
 
+  // Serialise to a map for writing to Firestore
   Map<String, dynamic> toMap() {
     return {
       'addedByUid': addedByUid,
@@ -62,7 +65,7 @@ class QueueItem {
       'position': position,
     };
   }
-
+  // Return a copy with specific fields changed
   QueueItem copyWith({
     int? voteScore,
     Map<String, int>? userVotes,

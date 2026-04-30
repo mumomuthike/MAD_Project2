@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Firestore path: /sessions/{sessionId}
 class Session {
   final String id;
   final String name;
@@ -22,6 +23,7 @@ class Session {
     required this.createdAt,
   });
 
+  // Build a Session from a Firestore document snapshot
   factory Session.fromDoc(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return Session(
@@ -35,7 +37,7 @@ class Session {
       createdAt: (data['createdAt'] as Timestamp).toDate(),
     );
   }
-
+  // Serialise to a map for writing to Firestore
   Map<String, dynamic> toMap() {
     return {
       'name': name,
@@ -47,7 +49,7 @@ class Session {
       'createdAt': Timestamp.fromDate(createdAt),
     };
   }
-
+  // Return a copy with specific fields changed
   Session copyWith({
     String? name,
     List<String>? moods,

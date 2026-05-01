@@ -47,9 +47,24 @@ class QueueService {
     await queueRef.add(queueItem);
 
     // Increment user's songs added count
-    await _firestore.collection('users').doc(user.uid).update({
-      'totalSongsAdded': FieldValue.increment(1)
-    });
+    final userRef = _firestore.collection('users').doc(user.uid);
+    final userDoc = await userRef.get();
+
+    if (userDoc.exists) {
+      await userRef.update({
+        'totalSongsAdded': FieldValue.increment(1)
+      });
+    } else {
+      // Create user document if it doesn't exist
+      await userRef.set({
+        'email': user.email,
+        'displayName': user.displayName ?? 'Anonymous',
+        'createdAt': FieldValue.serverTimestamp(),
+        'totalSessions': 0,
+        'totalSongsAdded': 1,
+        'totalVotesCast': 0,
+      });
+    }
   }
 
   Future<void> vote(String sessionId, String queueItemId, int voteValue) async {
@@ -60,12 +75,19 @@ class QueueService {
         .collection('queue')
         .doc(queueItemId);
 
+    // Track if this is a new vote (not just changing)
+    bool isNewVote = false;
+
     await _firestore.runTransaction((transaction) async {
       final doc = await transaction.get(docRef);
       if (!doc.exists) return;
 
       final userVotes = Map<String, int>.from(doc.data()?['userVotes'] ?? {});
       final previousVote = userVotes[user.uid] ?? 0;
+
+      if (previousVote == 0 && voteValue != 0) {
+        isNewVote = true;
+      }
 
       if (previousVote == voteValue) {
         // Remove vote
@@ -84,11 +106,25 @@ class QueueService {
       }
     });
 
-    // Increment user's votes cast count only for new votes
-    if (voteValue != 0) {
-      await _firestore.collection('users').doc(user.uid).update({
-        'totalVotesCast': FieldValue.increment(1)
-      });
+    // Increment user's votes cast count only for new votes (not vote changes)
+    if (isNewVote) {
+      final userRef = _firestore.collection('users').doc(user.uid);
+      final userDoc = await userRef.get();
+
+      if (userDoc.exists) {
+        await userRef.update({
+          'totalVotesCast': FieldValue.increment(1)
+        });
+      } else {
+        await userRef.set({
+          'email': user.email,
+          'displayName': user.displayName ?? 'Anonymous',
+          'createdAt': FieldValue.serverTimestamp(),
+          'totalSessions': 0,
+          'totalSongsAdded': 0,
+          'totalVotesCast': 1,
+        });
+      }
     }
   }
 }

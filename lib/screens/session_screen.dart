@@ -7,6 +7,7 @@ import '../services/queue_service.dart';
 import '../services/chat_service.dart';
 import '../models/QueueItem.dart';
 import '../models/ChatMessage.dart';
+import '../widgets/add_song_sheet.dart';
 
 // SessionScreen — users can view and add to the queue and vote on songs / chat
 class SessionScreen extends StatefulWidget {
@@ -150,19 +151,11 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   void _showAddSongSheet() {
-    // TODO: Implement Spotify search and add song functionality
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.transparent,
-        ),
-        child: const Center(
-          child: Text('Add Song UI - Coming Soon'),
-        ),
-      ),
+      builder: (_) => AddSongSheet(sessionId: widget.sessionId),
     );
   }
 

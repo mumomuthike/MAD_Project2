@@ -40,6 +40,7 @@ dependencies:
   cloud_functions: ^6.2.0
   firebase_storage: ^13.3.0
   firebase_messaging: ^16.2.0
+  spotify: ^0.16.1
   http: ^1.6.0
   cached_network_image: ^3.4.1
   just_audio: ^0.10.5

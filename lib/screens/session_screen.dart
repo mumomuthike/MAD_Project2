@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'home_screen.dart';
+import '../services/queue_service.dart';
+import '../services/chat_service.dart';
+import '../models/QueueItem.dart';
+import '../models/ChatMessage.dart';
 
 // SessionScreen — users can view and add to the queue and vote on songs / chat
 class SessionScreen extends StatefulWidget {
+  final String sessionId;
   final String sessionName;
   final List<String> moods;
   final bool isHost;
 
-  // TODO: add sessionId once Firestore is wired up
   const SessionScreen({
     super.key,
+    required this.sessionId,
     required this.sessionName,
     required this.moods,
     required this.isHost,
@@ -22,12 +29,37 @@ class SessionScreen extends StatefulWidget {
 
 class _SessionScreenState extends State<SessionScreen> {
   int _selectedTab = 0; // 0 = Queue, 1 = Chat
+  final QueueService _queueService = QueueService();
+  final ChatService _chatService = ChatService();
 
-  // Placeholder session code — replace with real Firestore doc ID
-  static const _sessionCode = 'VIBE-0000';
+  String? _joinCode;
+  bool _isLeaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadJoinCode();
+  }
+
+  Future<void> _loadJoinCode() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('sessions')
+          .doc(widget.sessionId)
+          .get();
+      if (doc.exists) {
+        setState(() {
+          _joinCode = doc.data()?['joinCode'] as String?;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading join code: $e');
+    }
+  }
 
   void _copyCode() {
-    Clipboard.setData(const ClipboardData(text: _sessionCode));
+    if (_joinCode == null) return;
+    Clipboard.setData(ClipboardData(text: _joinCode!));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text('Session code copied!'),
@@ -38,8 +70,12 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Future<bool> _onWillPop() async {
+    // Don't show dialog if already leaving
+    if (_isLeaving) return false;
+
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => AlertDialog(
         backgroundColor: Theme.of(context).colorScheme.surface,
         title: Text(
@@ -68,19 +104,72 @@ class _SessionScreenState extends State<SessionScreen> {
         ],
       ),
     );
-    if (confirmed == true && mounted) { // return to HomeScreen when session is abandoned
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-            (_) => false,
-      );
+
+    if (confirmed == true && mounted) {
+      setState(() => _isLeaving = true);
+
+      try {
+        if (widget.isHost) {
+          // End session for everyone
+          await FirebaseFirestore.instance
+              .collection('sessions')
+              .doc(widget.sessionId)
+              .update({'isActive': false});
+        } else {
+          // Remove user from session members
+          final userId = FirebaseAuth.instance.currentUser?.uid;
+          if (userId != null) {
+            await FirebaseFirestore.instance
+                .collection('sessions')
+                .doc(widget.sessionId)
+                .update({
+              'memberUids': FieldValue.arrayRemove([userId])
+            });
+          }
+        }
+
+        if (mounted) {
+          // Clear navigation stack and go to HomeScreen
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+                (route) => false,
+          );
+        }
+      } catch (e) {
+        debugPrint('Error leaving session: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: ${e.toString()}')),
+          );
+          setState(() => _isLeaving = false);
+        }
+      }
     }
     return false;
+  }
+
+  void _showAddSongSheet() {
+    // TODO: Implement Spotify search and add song functionality
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.transparent,
+        ),
+        child: const Center(
+          child: Text('Add Song UI - Coming Soon'),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
+    final code = _joinCode ?? 'LOADING...';
 
     return WillPopScope(
       onWillPop: _onWillPop,
@@ -121,7 +210,7 @@ class _SessionScreenState extends State<SessionScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _sessionCode,
+                      code,
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
@@ -147,8 +236,8 @@ class _SessionScreenState extends State<SessionScreen> {
             ),
             Expanded(
               child: _selectedTab == 0
-                  ? const _QueueTab()
-                  : const _ChatTab(),
+                  ? _QueueTab(sessionId: widget.sessionId)
+                  : _ChatTab(sessionId: widget.sessionId),
             ),
           ],
         ),
@@ -156,9 +245,7 @@ class _SessionScreenState extends State<SessionScreen> {
         // Add song FAB
         floatingActionButton: _selectedTab == 0
             ? FloatingActionButton.extended(
-          onPressed: () {
-            // TODO: open search-and-add song sheet
-          },
+          onPressed: _showAddSongSheet,
           backgroundColor: primary,
           foregroundColor: Colors.black,
           icon: const Icon(Icons.add_rounded),
@@ -250,117 +337,197 @@ class _Tab extends StatelessWidget {
   }
 }
 
-// Queue Tab — placeholder until Firestore is wired
+// Queue Tab with real Firestore data
 class _QueueTab extends StatelessWidget {
-  const _QueueTab();
+  final String sessionId;
+  const _QueueTab({required this.sessionId});
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final queueService = QueueService();
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
 
-    // TODO: replace with StreamBuilder on Firestore queue subcollection
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      children: [
-        _QueuePlaceholderTile(
-          title: 'Blinding Lights',
-          artist: 'The Weeknd',
-          votes: 4,
-          addedBy: 'Mumo',
-          primary: primary,
-        ),
-        _QueuePlaceholderTile(
-          title: 'As It Was',
-          artist: 'Harry Styles',
-          votes: 2,
-          addedBy: 'William',
-          primary: primary,
-        ),
-        _QueuePlaceholderTile(
-          title: 'Levitating',
-          artist: 'Dua Lipa',
-          votes: 1,
-          addedBy: 'Mumo',
-          primary: primary,
-        ),
-        const SizedBox(height: 80), // space above FAB
-      ],
+    return StreamBuilder<List<QueueItem>>(
+      stream: queueService.streamQueue(sessionId),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Error loading queue: ${snapshot.error}'),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(),
+          );
+        }
+
+        final queue = snapshot.data!;
+
+        if (queue.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.queue_music_rounded, size: 64, color: Colors.white38),
+                SizedBox(height: 16),
+                Text(
+                  'No songs in queue yet.\nTap the + button to add a song!',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white60),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          itemCount: queue.length,
+          itemBuilder: (context, index) {
+            final item = queue[index];
+            final userVote = item.getUserVote(currentUserId ?? '');
+            return _QueueTile(
+              queueItem: item,
+              userVote: userVote,
+              onVote: (voteValue) async {
+                await queueService.vote(sessionId, item.id, voteValue);
+              },
+            );
+          },
+        );
+      },
     );
   }
 }
 
-class _QueuePlaceholderTile extends StatefulWidget {
-  final String title;
-  final String artist;
-  final int votes;
-  final String addedBy;
-  final Color primary;
+class _QueueTile extends StatefulWidget {
+  final QueueItem queueItem;
+  final int userVote;
+  final Function(int) onVote;
 
-  const _QueuePlaceholderTile({
-    required this.title,
-    required this.artist,
-    required this.votes,
-    required this.addedBy,
-    required this.primary,
+  const _QueueTile({
+    required this.queueItem,
+    required this.userVote,
+    required this.onVote,
   });
 
   @override
-  State<_QueuePlaceholderTile> createState() => _QueuePlaceholderTileState();
+  State<_QueueTile> createState() => _QueueTileState();
 }
 
-class _QueuePlaceholderTileState extends State<_QueuePlaceholderTile> {
-  int _vote = 0; // -1, 0, or 1
+class _QueueTileState extends State<_QueueTile> {
+  late int _tempVote;
+
+  @override
+  void initState() {
+    super.initState();
+    _tempVote = widget.userVote;
+  }
+
+  @override
+  void didUpdateWidget(_QueueTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.userVote != oldWidget.userVote) {
+      _tempVote = widget.userVote;
+    }
+  }
+
+  void _handleVote(int voteValue) {
+    setState(() {
+      // Optimistic update
+      if (_tempVote == voteValue) {
+        _tempVote = 0;
+      } else {
+        _tempVote = voteValue;
+      }
+    });
+    widget.onVote(voteValue);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final surface = Theme.of(context).colorScheme.surface;
-    final primary = widget.primary;
-    final displayVotes = widget.votes + _vote;
+    final primary = Theme.of(context).colorScheme.primary;
+    final displayVotes = widget.queueItem.voteScore + (_tempVote - widget.userVote);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: surface,
+        color: widget.queueItem.isPlaying
+            ? primary.withOpacity(0.15)
+            : Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(
+          color: widget.queueItem.isPlaying ? primary : Colors.white12,
+          width: widget.queueItem.isPlaying ? 1.5 : 1,
+        ),
       ),
       child: Row(
         children: [
-          // Album art placeholder
+          // Album art
           Container(
             width: 48,
             height: 48,
             decoration: BoxDecoration(
               color: primary.withOpacity(0.15),
               borderRadius: BorderRadius.circular(8),
+              image: widget.queueItem.albumArtUrl.isNotEmpty
+                  ? DecorationImage(
+                image: NetworkImage(widget.queueItem.albumArtUrl),
+                fit: BoxFit.cover,
+              )
+                  : null,
             ),
-            child: Icon(Icons.music_note_rounded, color: primary, size: 24),
+            child: widget.queueItem.albumArtUrl.isEmpty
+                ? Icon(Icons.music_note_rounded, color: primary, size: 24)
+                : null,
           ),
           const SizedBox(width: 12),
 
-          // Title + artist
+          // Track info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.title,
+                  widget.queueItem.trackTitle,
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: Colors.white,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  widget.artist,
+                  widget.queueItem.artistName,
                   style: const TextStyle(fontSize: 12, color: Colors.white60),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  'Added by ${widget.addedBy}',
-                  style: const TextStyle(fontSize: 11, color: Colors.white38),
+                Row(
+                  children: [
+                    if (widget.queueItem.isPlaying) ...[
+                      Icon(Icons.play_circle_rounded, size: 12, color: primary),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Now Playing',
+                        style: TextStyle(fontSize: 11, color: primary),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: Text(
+                        'Added by ${widget.queueItem.addedByName}',
+                        style: const TextStyle(fontSize: 11, color: Colors.white38),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -371,9 +538,9 @@ class _QueuePlaceholderTileState extends State<_QueuePlaceholderTile> {
             children: [
               _VoteButton(
                 icon: Icons.thumb_up_rounded,
-                active: _vote == 1,
+                active: _tempVote == 1,
                 color: primary,
-                onTap: () => setState(() => _vote = _vote == 1 ? 0 : 1),
+                onTap: () => _handleVote(1),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
@@ -392,9 +559,9 @@ class _QueuePlaceholderTileState extends State<_QueuePlaceholderTile> {
               ),
               _VoteButton(
                 icon: Icons.thumb_down_rounded,
-                active: _vote == -1,
+                active: _tempVote == -1,
                 color: Theme.of(context).colorScheme.error,
-                onTap: () => setState(() => _vote = _vote == -1 ? 0 : -1),
+                onTap: () => _handleVote(-1),
               ),
             ],
           ),
@@ -438,9 +605,10 @@ class _VoteButton extends StatelessWidget {
   }
 }
 
-// Chat Tab — placeholder until Firestore is wired
+// Chat Tab with real Firestore data
 class _ChatTab extends StatefulWidget {
-  const _ChatTab();
+  final String sessionId;
+  const _ChatTab({required this.sessionId});
 
   @override
   State<_ChatTab> createState() => _ChatTabState();
@@ -448,14 +616,8 @@ class _ChatTab extends StatefulWidget {
 
 class _ChatTabState extends State<_ChatTab> {
   final _msgController = TextEditingController();
-  final _scrollController = ScrollController();
-
-  // Placeholder messages — replace with Firestore stream
-  final List<_ChatMessage> _messages = [
-    _ChatMessage(author: 'William', text: 'Let\'s get this going! 🎵', isMe: false),
-    _ChatMessage(author: 'Me', text: 'Added a few songs, check the queue', isMe: true),
-    _ChatMessage(author: 'William', text: 'Love the picks 🔥', isMe: false),
-  ];
+  final ScrollController _scrollController = ScrollController();
+  final ChatService _chatService = ChatService();
 
   @override
   void dispose() {
@@ -464,15 +626,15 @@ class _ChatTabState extends State<_ChatTab> {
     super.dispose();
   }
 
-  void _send() {
+  void _sendMessage() async {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
-    setState(() {
-      _messages.add(_ChatMessage(author: 'Me', text: text, isMe: true));
-      _msgController.clear();
-    });
-    // TODO: write message to Firestore chat subcollection
-    Future.delayed(const Duration(milliseconds: 50), () {
+
+    _msgController.clear();
+    await _chatService.sendMessage(widget.sessionId, text);
+
+    // Scroll to bottom after message is sent
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
@@ -486,15 +648,70 @@ class _ChatTabState extends State<_ChatTab> {
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
 
     return Column(
       children: [
         Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            itemCount: _messages.length,
-            itemBuilder: (_, i) => _ChatBubble(message: _messages[i]),
+          child: StreamBuilder<List<ChatMessage>>(
+            stream: _chatService.streamMessages(widget.sessionId),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text('Error loading messages: ${snapshot.error}'),
+                );
+              }
+
+              if (!snapshot.hasData) {
+                return const Center(
+                  child: CircularProgressIndicator(),
+                );
+              }
+
+              final messages = snapshot.data!;
+
+              // Auto-scroll to bottom on new messages
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_scrollController.hasClients && messages.isNotEmpty) {
+                  _scrollController.animateTo(
+                    _scrollController.position.maxScrollExtent,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                  );
+                }
+              });
+
+              if (messages.isEmpty) {
+                return const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.chat_bubble_outline_rounded, size: 64, color: Colors.white38),
+                      SizedBox(height: 16),
+                      Text(
+                        'No messages yet.\nBe the first to say something!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white60),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                itemCount: messages.length,
+                itemBuilder: (context, index) {
+                  final message = messages[index];
+                  final isMe = message.userId == currentUserId;
+                  return _ChatBubble(
+                    message: message,
+                    isMe: isMe,
+                  );
+                },
+              );
+            },
           ),
         ),
         Container(
@@ -507,17 +724,16 @@ class _ChatTabState extends State<_ChatTab> {
                   controller: _msgController,
                   decoration: const InputDecoration(
                     hintText: 'Say something...',
-                    contentPadding:
-                    EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   ),
                   style: const TextStyle(color: Colors.white),
                   textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _send(),
+                  onSubmitted: (_) => _sendMessage(),
                 ),
               ),
               const SizedBox(width: 8),
               GestureDetector(
-                onTap: _send,
+                onTap: _sendMessage,
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -536,31 +752,23 @@ class _ChatTabState extends State<_ChatTab> {
   }
 }
 
-class _ChatMessage {
-  final String author;
-  final String text;
+class _ChatBubble extends StatelessWidget {
+  final ChatMessage message;
   final bool isMe;
-  const _ChatMessage({
-    required this.author,
-    required this.text,
+
+  const _ChatBubble({
+    required this.message,
     required this.isMe,
   });
-}
-
-class _ChatBubble extends StatelessWidget {
-  final _ChatMessage message;
-  const _ChatBubble({required this.message});
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
-    final isMe = message.isMe;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
-        mainAxisAlignment:
-        isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMe) ...[
@@ -568,32 +776,30 @@ class _ChatBubble extends StatelessWidget {
               radius: 14,
               backgroundColor: primary.withOpacity(0.2),
               child: Text(
-                message.author[0].toUpperCase(),
+                message.userName.isNotEmpty ? message.userName[0].toUpperCase() : '?',
                 style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: primary),
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: primary,
+                ),
               ),
             ),
             const SizedBox(width: 8),
           ],
           Flexible(
             child: Column(
-              crossAxisAlignment:
-              isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 if (!isMe)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 3, left: 4),
                     child: Text(
-                      message.author,
-                      style: const TextStyle(
-                          fontSize: 11, color: Colors.white60),
+                      message.userName,
+                      style: const TextStyle(fontSize: 11, color: Colors.white60),
                     ),
                   ),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: isMe
                         ? primary.withOpacity(0.85)

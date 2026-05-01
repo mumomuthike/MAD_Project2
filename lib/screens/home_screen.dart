@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'profile_screen.dart';
 import 'session_screen.dart';
+import '../services/session_service.dart';
+import '../models/Session.dart';
 
 // HomeScreen — create/join session and view recent sessions
 class HomeScreen extends StatefulWidget {
@@ -13,6 +16,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final SessionService _sessionService = SessionService();
+
   void _openProfile() {
     Navigator.push(
       context,
@@ -82,6 +87,8 @@ class _LobbyTab extends StatefulWidget {
 
 class _LobbyTabState extends State<_LobbyTab> {
   final _joinCodeController = TextEditingController();
+  final SessionService _sessionService = SessionService();
+  bool _isJoining = false;
 
   @override
   void dispose() {
@@ -95,14 +102,35 @@ class _LobbyTabState extends State<_LobbyTab> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _CreateSessionSheet(
-        onCreated: (name, moods) {
-          // TODO: write Firestore session document before navigating
+        onCreated: (name, moods) async {
+          final sessionId = await _sessionService.createSession(name, moods);
+          if (!mounted) return;
+
+          final sessionDoc = await FirebaseFirestore.instance
+              .collection('sessions')
+              .doc(sessionId)
+              .get();
+
+          if (!sessionDoc.exists) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Failed to create session')),
+              );
+            }
+            return;
+          }
+
+          final session = Session.fromDoc(sessionDoc);
+
+          if (!mounted) return;
+
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (_) => SessionScreen(
-                sessionName: name,
-                moods: moods,
+                sessionId: session.id,
+                sessionName: session.name,
+                moods: session.moods,
                 isHost: true,
               ),
             ),
@@ -112,8 +140,47 @@ class _LobbyTabState extends State<_LobbyTab> {
     );
   }
 
-  void _joinSession() {
-    // TODO: look up Firestore session by code and navigate to SessionScreen
+  Future<void> _joinSession() async {
+    final code = _joinCodeController.text.trim().toUpperCase();
+    if (code.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a session code')),
+      );
+      return;
+    }
+
+    setState(() => _isJoining = true);
+
+    try {
+      final session = await _sessionService.joinSession(code);
+
+      if (session != null && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SessionScreen(
+              sessionId: session.id,
+              sessionName: session.name,
+              moods: session.moods,
+              isHost: session.hostUid == FirebaseAuth.instance.currentUser?.uid,
+            ),
+          ),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid or expired session code')),
+        );
+        _joinCodeController.clear();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error joining session: ${e.toString()}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isJoining = false);
+    }
   }
 
   @override
@@ -123,41 +190,42 @@ class _LobbyTabState extends State<_LobbyTab> {
         ? user!.displayName!
         : user?.email?.split('@').first ?? 'there';
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      children: [
-        // Greeting
-        _GreetingHeader(displayName: displayName),
-        const SizedBox(height: 32),
+    return RefreshIndicator(
+      onRefresh: () async {
+        setState(() {});
+      },
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        children: [
+          _GreetingHeader(displayName: displayName),
+          const SizedBox(height: 32),
 
-        // Create session card
-        _SectionLabel(label: 'Start a session'),
-        const SizedBox(height: 12),
-        _CreateSessionCard(onTap: _createSession),
-        const SizedBox(height: 28),
+          _SectionLabel(label: 'Start a session'),
+          const SizedBox(height: 12),
+          _CreateSessionCard(onTap: _createSession),
+          const SizedBox(height: 28),
 
-        // Join session card
-        _SectionLabel(label: 'Join a session'),
-        const SizedBox(height: 12),
-        _JoinSessionCard(
-          controller: _joinCodeController,
-          onJoin: _joinSession,
-        ),
-        const SizedBox(height: 28),
+          _SectionLabel(label: 'Join a session'),
+          const SizedBox(height: 12),
+          _JoinSessionCard(
+            controller: _joinCodeController,
+            onJoin: _joinSession,
+            isJoining: _isJoining,
+          ),
+          const SizedBox(height: 28),
 
-        // Recent sessions
-        _SectionLabel(label: 'Recent sessions'),
-        const SizedBox(height: 12),
-        const _RecentSessionsList(),
-        const SizedBox(height: 28),
+          _SectionLabel(label: 'Past sessions'),
+          const SizedBox(height: 12),
+          const _RecentSessionsList(),
+          const SizedBox(height: 28),
 
-        const SizedBox(height: 8),
-      ],
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 }
 
-// Greeting header
 class _GreetingHeader extends StatelessWidget {
   final String displayName;
   const _GreetingHeader({required this.displayName});
@@ -193,7 +261,6 @@ class _GreetingHeader extends StatelessWidget {
   }
 }
 
-// Section label
 class _SectionLabel extends StatelessWidget {
   final String label;
   const _SectionLabel({required this.label});
@@ -212,10 +279,8 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-// Create session card
 class _CreateSessionCard extends StatelessWidget {
   final VoidCallback onTap;
-
   const _CreateSessionCard({required this.onTap});
 
   @override
@@ -275,14 +340,15 @@ class _CreateSessionCard extends StatelessWidget {
   }
 }
 
-// Join session card
 class _JoinSessionCard extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onJoin;
+  final bool isJoining;
 
   const _JoinSessionCard({
     required this.controller,
     required this.onJoin,
+    this.isJoining = false,
   });
 
   @override
@@ -346,14 +412,20 @@ class _JoinSessionCard extends StatelessWidget {
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: onJoin,
+                  onPressed: isJoining ? null : onJoin,
                   style: ElevatedButton.styleFrom(
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                   ),
-                  child: const Text('Join'),
+                  child: isJoining
+                      ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                      : const Text('Join'),
                 ),
               ),
             ],
@@ -364,59 +436,121 @@ class _JoinSessionCard extends StatelessWidget {
   }
 }
 
-// Recent sessions list  (placeholder tiles — replace with Firestore stream)
+// Recent sessions list - Shows ended/past sessions only (last 2), NOT tappable
 class _RecentSessionsList extends StatelessWidget {
   const _RecentSessionsList();
 
-  static const _mock = [
-    _MockSession('Friday Night Vibes 🎵', 'VIBE-4829', 6, '2 days ago'),
-    _MockSession('Study Beats 📚', 'VIBE-1103', 3, '5 days ago'),
-  ];
-
   @override
   Widget build(BuildContext context) {
-    // TODO: replace with StreamBuilder on Firestore
-    if (_mock.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: const Center(
-          child: Text(
-            'No recent sessions yet.\nCreate or join one above!',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white60, fontSize: 13),
-          ),
-        ),
-      );
-    }
+    final userId = FirebaseAuth.instance.currentUser?.uid;
 
-    return Column(
-      children: _mock
-          .map((s) => _RecentSessionTile(session: s))
-          .toList(),
+    if (userId == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('sessions')
+          .where('memberUids', arrayContains: userId)
+          .orderBy('createdAt', descending: true)
+          .limit(5)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: Center(
+              child: Text(
+                'Error loading sessions: ${snapshot.error}',
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+            ),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: const Center(
+              child: SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        }
+
+        final sessions = snapshot.data!.docs;
+
+        if (sessions.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: const Center(
+              child: Text(
+                'No past sessions yet.\nCreate or join a session to get started!',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60, fontSize: 13),
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          children: sessions.map((doc) {
+            try {
+              final session = Session.fromDoc(doc);
+              return _PastSessionTile(session: session);
+            } catch (e) {
+              return const SizedBox.shrink();
+            }
+          }).toList(),
+        );
+      },
     );
   }
 }
 
-class _MockSession {
-  final String name;
-  final String code;
-  final int memberCount;
-  final String timeAgo;
-  const _MockSession(this.name, this.code, this.memberCount, this.timeAgo);
-}
+// Past Session Tile - DISPLAY ONLY, NOT TAPPABLE (Icon removed, member count above time)
+class _PastSessionTile extends StatelessWidget {
+  final Session session;
+  const _PastSessionTile({required this.session});
 
-class _RecentSessionTile extends StatelessWidget {
-  final _MockSession session;
-  const _RecentSessionTile({required this.session});
+  String _getTimeAgo() {
+    try {
+      final now = DateTime.now();
+      final diff = now.difference(session.createdAt);
+
+      if (diff.inDays > 30) return '${(diff.inDays / 30).floor()} months ago';
+      if (diff.inDays > 7) return '${(diff.inDays / 7).floor()} weeks ago';
+      if (diff.inDays > 0) return '${diff.inDays} days ago';
+      if (diff.inHours > 0) return '${diff.inHours} hours ago';
+      if (diff.inMinutes > 0) return '${diff.inMinutes} minutes ago';
+      return 'Just now';
+    } catch (e) {
+      return 'Recently';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
+    final isActive = session.isActive;
+    final statusColor = isActive ? primary : Colors.white38;
+    final statusText = isActive ? 'Active' : 'Ended';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -426,58 +560,100 @@ class _RecentSessionTile extends StatelessWidget {
         border: Border.all(color: Colors.white12),
       ),
       child: ListTile(
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: primary.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(Icons.queue_music_rounded, color: primary, size: 22),
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        // Removed the leading icon to give more space for text
         title: Text(
           session.name,
           style: const TextStyle(
-              fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
         ),
-        subtitle: Row(
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.people_outline_rounded,
-                size: 12, color: Colors.white60),
-            const SizedBox(width: 4),
-            Text(
-              '${session.memberCount} members · ${session.timeAgo}',
-              style: const TextStyle(fontSize: 11, color: Colors.white60),
+            // Members row (above time)
+            Row(
+              children: [
+                Icon(Icons.people_outline_rounded, size: 12, color: Colors.white60),
+                const SizedBox(width: 4),
+                Text(
+                  '${session.memberUids.length} members',
+                  style: const TextStyle(fontSize: 11, color: Colors.white60),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 4,
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    color: Colors.white38,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: statusColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            // Time row (below members)
+            Row(
+              children: [
+                Icon(
+                  Icons.access_time_rounded,
+                  size: 11,
+                  color: Colors.white60,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  _getTimeAgo(),
+                  style: const TextStyle(fontSize: 11, color: Colors.white60),
+                ),
+              ],
             ),
           ],
         ),
         trailing: GestureDetector(
           onTap: () {
-            Clipboard.setData(ClipboardData(text: session.code));
+            Clipboard.setData(ClipboardData(text: session.joinCode));
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Code "${session.code}" copied!'),
+                content: Text('Code "${session.joinCode}" copied!'),
                 duration: const Duration(seconds: 2),
                 backgroundColor: primary,
               ),
             );
           },
           child: Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: primary.withOpacity(0.12),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              session.code,
+              session.joinCode,
               style: TextStyle(
-                  fontSize: 11,
-                  color: primary,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2),
+                fontSize: 11,
+                color: primary,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
             ),
           ),
         ),
@@ -485,6 +661,7 @@ class _RecentSessionTile extends StatelessWidget {
     );
   }
 }
+
 // Create session bottom sheet
 class _CreateSessionSheet extends StatefulWidget {
   final void Function(String name, List<String> moods) onCreated;
@@ -511,7 +688,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
   @override
   void initState() {
     super.initState();
-    // Auto-focus name field after sheet animates in
     Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) _nameFocus.requestFocus();
     });
@@ -530,7 +706,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
       _nameFocus.requestFocus();
       return;
     }
-    // TODO: write Firestore session document here
     Navigator.pop(context);
     widget.onCreated(name, _selectedMoods.toList());
   }
@@ -550,7 +725,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle bar
           Center(
             child: Container(
               width: 40,
@@ -563,7 +737,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
           ),
           const SizedBox(height: 20),
 
-          // Title
           const Text(
             'New Session',
             style: TextStyle(
@@ -579,7 +752,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
           ),
           const SizedBox(height: 24),
 
-          // Session name field
           TextField(
             controller: _nameController,
             focusNode: _nameFocus,
@@ -594,7 +766,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
           ),
           const SizedBox(height: 24),
 
-          // Mood tags
           const Text(
             'MOOD TAGS',
             style: TextStyle(
@@ -642,7 +813,6 @@ class _CreateSessionSheetState extends State<_CreateSessionSheet> {
           ),
           const SizedBox(height: 28),
 
-          // Create button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(

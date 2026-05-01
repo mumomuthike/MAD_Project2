@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'home_screen.dart';
+import '../services/user_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -49,9 +50,15 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         // Set display name
-        await credential.user
-            ?.updateDisplayName(_displayNameController.text.trim());
+        final displayName = _displayNameController.text.trim();
+        if (displayName.isNotEmpty) {
+          await credential.user?.updateDisplayName(displayName);
+        }
       }
+
+      // Ensure user document exists in Firestore
+      final userService = UserService();
+      await userService.ensureUserDocument();
 
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -60,6 +67,8 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } on FirebaseAuthException catch (e) {
       setState(() => _errorMessage = _friendlyError(e.code));
+    } catch (e) {
+      setState(() => _errorMessage = 'An unexpected error occurred. Please try again.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -79,6 +88,8 @@ class _LoginScreenState extends State<LoginScreen> {
         return 'Please enter a valid email address.';
       case 'too-many-requests':
         return 'Too many attempts. Please try again later.';
+      case 'network-request-failed':
+        return 'Network error. Please check your internet connection.';
       default:
         return 'Something went wrong. Please try again.';
     }
@@ -146,6 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     style: const TextStyle(color: Colors.white),
                     textInputAction: TextInputAction.next,
+                    textCapitalization: TextCapitalization.words,
                   ),
                   const SizedBox(height: 14),
                 ],
@@ -160,6 +172,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: const TextStyle(color: Colors.white),
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
+                  autocorrect: false,
                 ),
                 const SizedBox(height: 14),
 

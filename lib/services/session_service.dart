@@ -8,44 +8,113 @@ class SessionService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   Future<String> createSession(String name, List<String> moods) async {
-    final user = _auth.currentUser!;
-    final joinCode = Session.generateJoinCode();
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not logged in');
+      }
 
-    final session = {
-      'name': name,
-      'hostUid': user.uid,
-      'joinCode': joinCode,
-      'moods': moods,
-      'memberUids': [user.uid],
-      'isActive': true,
-      'createdAt': FieldValue.serverTimestamp(),
-    };
+      final joinCode = Session.generateJoinCode();
 
-    final docRef = await _firestore.collection('sessions').add(session);
-    return docRef.id;
+      final session = {
+        'name': name,
+        'hostUid': user.uid,
+        'joinCode': joinCode,
+        'moods': moods,
+        'memberUids': [user.uid],
+        'isActive': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      print('Creating session with data: $session');
+
+      final docRef = await _firestore.collection('sessions').add(session);
+      print('Session created with ID: ${docRef.id}');
+
+      // Increment user's total sessions count
+      final userRef = _firestore.collection('users').doc(user.uid);
+      final userDoc = await userRef.get();
+
+      if (userDoc.exists) {
+        await userRef.update({
+          'totalSessions': FieldValue.increment(1)
+        });
+      } else {
+        // Create user document if it doesn't exist
+        await userRef.set({
+          'email': user.email,
+          'displayName': user.displayName ?? 'Anonymous',
+          'createdAt': FieldValue.serverTimestamp(),
+          'totalSessions': 1,
+          'totalSongsAdded': 0,
+          'totalVotesCast': 0,
+        });
+      }
+
+      return docRef.id;
+    } catch (e) {
+      print('Error creating session: $e');
+      throw Exception('Failed to create session: $e');
+    }
   }
 
   Future<Session?> joinSession(String joinCode) async {
-    final query = await _firestore
-        .collection('sessions')
-        .where('joinCode', isEqualTo: joinCode.toUpperCase())
-        .where('isActive', isEqualTo: true)
-        .limit(1)
-        .get();
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not logged in');
+      }
 
-    if (query.docs.isEmpty) return null;
+      print('Looking for session with code: $joinCode');
 
-    final session = Session.fromDoc(query.docs.first);
+      final query = await _firestore
+          .collection('sessions')
+          .where('joinCode', isEqualTo: joinCode.toUpperCase())
+          .where('isActive', isEqualTo: true)
+          .limit(1)
+          .get();
 
-    // Add user as member if not already
-    final user = _auth.currentUser!;
-    if (!session.memberUids.contains(user.uid)) {
-      await query.docs.first.reference.update({
-        'memberUids': FieldValue.arrayUnion([user.uid])
-      });
+      if (query.docs.isEmpty) {
+        print('No session found with code: $joinCode');
+        return null;
+      }
+
+      final session = Session.fromDoc(query.docs.first);
+      print('Found session: ${session.name} (${session.id})');
+
+      // Add user as member if not already
+      if (!session.memberUids.contains(user.uid)) {
+        print('Adding user ${user.uid} to session members');
+        await query.docs.first.reference.update({
+          'memberUids': FieldValue.arrayUnion([user.uid])
+        });
+
+        // Increment user's total sessions count for joining a session
+        final userRef = _firestore.collection('users').doc(user.uid);
+        final userDoc = await userRef.get();
+
+        if (userDoc.exists) {
+          await userRef.update({
+            'totalSessions': FieldValue.increment(1)
+          });
+        } else {
+          // Create user document if it doesn't exist
+          await userRef.set({
+            'email': user.email,
+            'displayName': user.displayName ?? 'Anonymous',
+            'createdAt': FieldValue.serverTimestamp(),
+            'totalSessions': 1,
+            'totalSongsAdded': 0,
+            'totalVotesCast': 0,
+          });
+        }
+      }
+
+      return session;
+    } catch (e) {
+      print('Error joining session: $e');
+      throw Exception('Failed to join session: $e');
     }
-
-    return session;
   }
 
   Stream<Session> streamSession(String sessionId) {
@@ -57,9 +126,15 @@ class SessionService {
   }
 
   Future<void> endSession(String sessionId) async {
-    await _firestore
-        .collection('sessions')
-        .doc(sessionId)
-        .update({'isActive': false});
+    try {
+      await _firestore
+          .collection('sessions')
+          .doc(sessionId)
+          .update({'isActive': false});
+      print('Session $sessionId ended');
+    } catch (e) {
+      print('Error ending session: $e');
+      throw Exception('Failed to end session: $e');
+    }
   }
 }

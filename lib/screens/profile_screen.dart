@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'login_screen.dart';
+import '../models/UserProfile.dart';
 
 // ProfileScreen — view/edit profile, view/edit settings, and view stats
 class ProfileScreen extends StatefulWidget {
@@ -54,6 +56,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
               if (name.isNotEmpty) {
                 await FirebaseAuth.instance.currentUser
                     ?.updateDisplayName(name);
+
+                // Also update display name in Firestore user document
+                final userId = FirebaseAuth.instance.currentUser?.uid;
+                if (userId != null) {
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(userId)
+                      .update({'displayName': name});
+                }
               }
               if (mounted) {
                 setState(() {}); // refresh displayed name
@@ -67,6 +78,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Stream<UserProfile> _getUserProfile() {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) {
+      return Stream.value(UserProfile(
+        uid: '',
+        email: '',
+        displayName: '',
+        createdAt: DateTime.now(),
+      ));
+    }
+
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .snapshots()
+        .map((doc) {
+      if (doc.exists) {
+        return UserProfile.fromDoc(doc);
+      } else {
+        // Return default profile if doesn't exist yet
+        return UserProfile(
+          uid: userId,
+          email: _email,
+          displayName: _displayName,
+          createdAt: DateTime.now(),
+        );
+      }
+    });
+  }
+
+  void _showChangePassword() {
+    // TODO: Implement password change functionality
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Change password coming soon!')),
+    );
+  }
+
+  void _showNotifications() {
+    // TODO: Implement notifications settings
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Notification settings coming soon!')),
+    );
+  }
+
+  void _connectSpotify() {
+    // TODO: Implement Spotify connection
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Spotify connection coming soon!')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
@@ -76,121 +138,144 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: const Text('Profile'),
         leading: const BackButton(),
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        children: [
-          // Avatar
-          Center(
-            child: Stack(
-              alignment: Alignment.bottomRight,
-              children: [
-                CircleAvatar(
-                  radius: 52,
-                  backgroundColor: primary.withOpacity(0.2),
-                  child: Text(
-                    (_displayName.isNotEmpty ? _displayName[0] : '?')
-                        .toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 42,
-                      fontWeight: FontWeight.bold,
-                      color: primary,
-                    ),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: _showEditName,
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: primary,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: Theme.of(context).scaffoldBackgroundColor,
-                          width: 2),
-                    ),
-                    child: const Icon(Icons.edit_rounded,
-                        color: Colors.black, size: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
+      body: StreamBuilder<UserProfile>(
+        stream: _getUserProfile(),
+        builder: (context, snapshot) {
+          final stats = snapshot.data;
 
-          // Name & email
-          Center(
-            child: Text(
-              _displayName,
-              style: const TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Center(
-            child: Text(
-              _email,
-              style: const TextStyle(fontSize: 13, color: Colors.white60),
-            ),
-          ),
-          const SizedBox(height: 32),
-
-          // Stats row
-          // TODO: replace hardcoded values with Firestore data
-          Row(
+          return ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
             children: [
-              _StatBox(label: 'Sessions', value: '12'),
-              const SizedBox(width: 12),
-              _StatBox(label: 'Songs Added', value: '84'),
-              const SizedBox(width: 12),
-              _StatBox(label: 'Votes Cast', value: '213'),
+              // Avatar
+              Center(
+                child: Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    CircleAvatar(
+                      radius: 52,
+                      backgroundColor: primary.withOpacity(0.2),
+                      child: Text(
+                        (_displayName.isNotEmpty ? _displayName[0] : '?')
+                            .toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 42,
+                          fontWeight: FontWeight.bold,
+                          color: primary,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: _showEditName,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: primary,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                              width: 2),
+                        ),
+                        child: const Icon(Icons.edit_rounded,
+                            color: Colors.black, size: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // Name & email
+              Center(
+                child: Text(
+                  _displayName,
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Center(
+                child: Text(
+                  _email,
+                  style: const TextStyle(fontSize: 13, color: Colors.white60),
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // Stats row with real data from Firestore
+              if (snapshot.hasData && stats != null)
+                Row(
+                  children: [
+                    _StatBox(label: 'Sessions', value: stats.totalSessions.toString()),
+                    const SizedBox(width: 12),
+                    _StatBox(label: 'Songs Added', value: stats.totalSongsAdded.toString()),
+                    const SizedBox(width: 12),
+                    _StatBox(label: 'Votes Cast', value: stats.totalVotesCast.toString()),
+                  ],
+                )
+              else if (snapshot.hasError)
+                Row(
+                  children: [
+                    _StatBox(label: 'Sessions', value: '--'),
+                    const SizedBox(width: 12),
+                    _StatBox(label: 'Songs Added', value: '--'),
+                    const SizedBox(width: 12),
+                    _StatBox(label: 'Votes Cast', value: '--'),
+                  ],
+                )
+              else
+                const Row(
+                  children: [
+                    _StatBox(label: 'Sessions', value: '...'),
+                    SizedBox(width: 12),
+                    _StatBox(label: 'Songs Added', value: '...'),
+                    SizedBox(width: 12),
+                    _StatBox(label: 'Votes Cast', value: '...'),
+                  ],
+                ),
+              const SizedBox(height: 28),
+
+              // Settings section
+              _SectionLabel(label: 'Account'),
+              const SizedBox(height: 10),
+              _ProfileTile(
+                icon: Icons.edit_outlined,
+                label: 'Edit Display Name',
+                onTap: _showEditName,
+              ),
+              _ProfileTile(
+                icon: Icons.lock_outline_rounded,
+                label: 'Change Password',
+                onTap: _showChangePassword,
+              ),
+              const SizedBox(height: 20),
+
+              _SectionLabel(label: 'App'),
+              const SizedBox(height: 10),
+              _ProfileTile(
+                icon: Icons.notifications_outlined,
+                label: 'Notifications',
+                onTap: _showNotifications,
+              ),
+              _ProfileTile(
+                icon: Icons.music_note_outlined,
+                label: 'Connect Spotify',
+                onTap: _connectSpotify,
+              ),
+              // Removed "My Stats" button as it's redundant with stats above
+              const SizedBox(height: 20),
+
+              _SectionLabel(label: 'Session'),
+              const SizedBox(height: 10),
+              _ProfileTile(
+                icon: Icons.logout_rounded,
+                label: 'Sign Out',
+                labelColor: Theme.of(context).colorScheme.error,
+                onTap: _signOut,
+              ),
+              const SizedBox(height: 24),
             ],
-          ),
-          const SizedBox(height: 28),
-
-          // Settings section
-          _SectionLabel(label: 'Account'),
-          const SizedBox(height: 10),
-          _ProfileTile(
-            icon: Icons.edit_outlined,
-            label: 'Edit Display Name',
-            onTap: _showEditName,
-          ),
-          _ProfileTile(
-            icon: Icons.lock_outline_rounded,
-            label: 'Change Password',
-            onTap: () {}, // TODO
-          ),
-          const SizedBox(height: 20),
-
-          _SectionLabel(label: 'App'),
-          const SizedBox(height: 10),
-          _ProfileTile(
-            icon: Icons.notifications_outlined,
-            label: 'Notifications',
-            onTap: () {}, // TODO
-          ),
-          _ProfileTile(
-            icon: Icons.music_note_outlined,
-            label: 'Connect Spotify',
-            onTap: () {}, // TODO
-          ),
-          _ProfileTile(
-            icon: Icons.bar_chart_rounded,
-            label: 'My Stats',
-            onTap: () {}, // TODO
-          ),
-          const SizedBox(height: 20),
-
-          _SectionLabel(label: 'Session'),
-          const SizedBox(height: 10),
-          _ProfileTile(
-            icon: Icons.logout_rounded,
-            label: 'Sign Out',
-            labelColor: Theme.of(context).colorScheme.error,
-            onTap: _signOut,
-          ),
-          const SizedBox(height: 24),
-        ],
+          );
+        },
       ),
     );
   }

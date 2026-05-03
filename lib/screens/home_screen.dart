@@ -97,119 +97,42 @@ class _CreateJoinSectionState extends State<_CreateJoinSection> {
   }
 
   Future<void> _createSession() async {
-    final nameController = TextEditingController();
-    final selectedMoods = <String>[];
-
-    await showDialog(
+    // Use an extracted StatefulWidget for the dialog instead of StatefulBuilder.
+    //
+    // StatefulBuilder shares its build context with the dialog route. When the
+    // route begins its exit animation, Flutter disposes the route's
+    // AnimationControllers — but a pending setStateDialog() call (from a mood
+    // tap) fires didUpdateWidget on an animated child (ElevatedButton, etc.)
+    // that tries to re-subscribe to the already-disposed controller:
+    //   ChangeNotifier.debugAssertNotDisposed → crash.
+    //
+    // A proper StatefulWidget has its own element and is cleanly unmounted
+    // before the route animations are disposed, preventing the race.
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              backgroundColor: Theme.of(context).colorScheme.surface,
-              title: const Text(
-                'Create Session',
-                style: TextStyle(color: Colors.white),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      hintText: 'Session name',
-                      hintStyle: TextStyle(color: Colors.white60),
-                    ),
-                    style: const TextStyle(color: Colors.white),
-                    autofocus: true,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Moods (tap to select)',
-                    style: TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: ['🔥 Hype', '😌 Chill', '💃 Party', '📚 Focus']
-                        .map((mood) {
-                          final isSelected = selectedMoods.contains(mood);
-
-                          return GestureDetector(
-                            onTap: () {
-                              setStateDialog(() {
-                                if (isSelected) {
-                                  selectedMoods.remove(mood);
-                                } else {
-                                  selectedMoods.add(mood);
-                                }
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? Theme.of(
-                                        context,
-                                      ).colorScheme.primary.withOpacity(0.2)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.white24,
-                                ),
-                              ),
-                              child: Text(
-                                mood,
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.white70,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          );
-                        })
-                        .toList(),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final name = nameController.text.trim();
-                    if (name.isEmpty) return;
-
-                    Navigator.pop(context);
-
-                    final sessionId = await _sessionService.createSession(
-                      name,
-                      selectedMoods,
-                    );
-
-                    if (!context.mounted) return;
-
-                    widget.onEnterSession(sessionId, name, selectedMoods, true);
-                  },
-                  child: const Text('Create'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      barrierDismissible: false,
+      builder: (_) => const _CreateSessionDialog(),
     );
 
-    nameController.dispose();
+    if (result != null && mounted) {
+      final name = result['name'] as String;
+      final moods = result['moods'] as List<String>;
+
+      setState(() => _isJoining = true);
+
+      try {
+        final sessionId = await _sessionService.createSession(name, moods);
+        if (!mounted) return;
+        widget.onEnterSession(sessionId, name, moods, true);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error creating session: $e')),
+        );
+      } finally {
+        if (mounted) setState(() => _isJoining = false);
+      }
+    }
   }
 
   Future<void> _joinSession() async {
@@ -345,10 +268,10 @@ class _CreateJoinSectionState extends State<_CreateJoinSection> {
                 onPressed: _isJoining ? null : _joinSession,
                 child: _isJoining
                     ? const SizedBox(
-                        height: 16,
-                        width: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
                     : const Text('Join'),
               ),
             ],
@@ -724,5 +647,108 @@ class _PastSessions extends StatelessWidget {
     }
 
     return 'Just now';
+  }
+}
+
+// Extracted dialog widget — avoids StatefulBuilder's disposed-AnimationController
+// crash. See _CreateJoinSectionState._createSession for full explanation.
+class _CreateSessionDialog extends StatefulWidget {
+  const _CreateSessionDialog();
+
+  @override
+  State<_CreateSessionDialog> createState() => _CreateSessionDialogState();
+}
+
+class _CreateSessionDialogState extends State<_CreateSessionDialog> {
+  final TextEditingController _nameController = TextEditingController();
+  final List<String> _selectedMoods = [];
+
+  static const _moods = ['🔥 Hype', '😌 Chill', '💃 Party', '📚 Focus'];
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return AlertDialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      title: const Text('Create Session', style: TextStyle(color: Colors.white)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              hintText: 'Session name',
+              hintStyle: TextStyle(color: Colors.white60),
+            ),
+            style: const TextStyle(color: Colors.white),
+            autofocus: true,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Moods (tap to select)',
+            style: TextStyle(color: Colors.white60, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: _moods.map((mood) {
+              final isSelected = _selectedMoods.contains(mood);
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (isSelected) {
+                      _selectedMoods.remove(mood);
+                    } else {
+                      _selectedMoods.add(mood);
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSelected ? primary.withOpacity(0.2) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isSelected ? primary : Colors.white24,
+                    ),
+                  ),
+                  child: Text(
+                    mood,
+                    style: TextStyle(
+                      color: isSelected ? primary : Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, null),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final name = _nameController.text.trim();
+            if (name.isEmpty) return;
+            Navigator.pop(context, {
+              'name': name,
+              'moods': List<String>.from(_selectedMoods),
+            });
+          },
+          child: const Text('Create'),
+        ),
+      ],
+    );
   }
 }

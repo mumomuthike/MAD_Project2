@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'home_screen.dart';
+import 'main_screen.dart';
 import '../services/user_service.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -36,39 +36,38 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       if (_isLogin) {
-        // Sign in
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
       } else {
-        // Register
         final credential = await FirebaseAuth.instance
             .createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
+              email: _emailController.text.trim(),
+              password: _passwordController.text.trim(),
+            );
 
-        // Set display name
         final displayName = _displayNameController.text.trim();
         if (displayName.isNotEmpty) {
           await credential.user?.updateDisplayName(displayName);
         }
       }
 
-      // Ensure user document exists in Firestore
       final userService = UserService();
       await userService.ensureUserDocument();
 
       if (!mounted) return;
+      // Navigate to MainScreen, not HomeScreen
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(builder: (_) => const MainScreen()),
       );
     } on FirebaseAuthException catch (e) {
       setState(() => _errorMessage = _friendlyError(e.code));
     } catch (e) {
-      setState(() => _errorMessage = 'An unexpected error occurred. Please try again.');
+      setState(
+        () => _errorMessage = 'An unexpected error occurred. Please try again.',
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -107,7 +106,6 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo
                 Icon(Icons.music_note_rounded, size: 64, color: primary),
                 const SizedBox(height: 12),
                 Text(
@@ -126,7 +124,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 40),
 
-                // Toggle
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -147,13 +144,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 28),
 
-                // Display name (register only)
                 if (!_isLogin) ...[
                   TextField(
                     controller: _displayNameController,
                     decoration: const InputDecoration(
                       hintText: 'Display name',
-                      prefixIcon: Icon(Icons.person_outline, color: Colors.white70),
+                      prefixIcon: Icon(
+                        Icons.person_outline,
+                        color: Colors.white70,
+                      ),
                     ),
                     style: const TextStyle(color: Colors.white),
                     textInputAction: TextInputAction.next,
@@ -162,12 +161,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 14),
                 ],
 
-                // Email
                 TextField(
                   controller: _emailController,
                   decoration: const InputDecoration(
                     hintText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined, color: Colors.white70),
+                    prefixIcon: Icon(
+                      Icons.email_outlined,
+                      color: Colors.white70,
+                    ),
                   ),
                   style: const TextStyle(color: Colors.white),
                   keyboardType: TextInputType.emailAddress,
@@ -176,15 +177,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 14),
 
-                // Password
                 TextField(
                   controller: _passwordController,
                   decoration: InputDecoration(
                     hintText: 'Password',
-                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.white70),
+                    prefixIcon: const Icon(
+                      Icons.lock_outline,
+                      color: Colors.white70,
+                    ),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        _obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
                         color: Colors.white70,
                       ),
                       onPressed: () =>
@@ -198,7 +203,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Error message
                 if (_errorMessage != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -212,20 +216,19 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
 
-                // Submit button
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : _submit,
                     child: _isLoading
                         ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.black,
-                      ),
-                    )
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.black,
+                            ),
+                          )
                         : Text(_isLogin ? 'Sign In' : 'Create Account'),
                   ),
                 ),

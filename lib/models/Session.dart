@@ -49,6 +49,7 @@ class Session {
       'createdAt': Timestamp.fromDate(createdAt),
     };
   }
+
   // Return a copy with specific fields changed
   Session copyWith({
     String? name,

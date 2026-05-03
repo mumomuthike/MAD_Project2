@@ -32,11 +32,7 @@ class AlbumArt extends StatelessWidget {
                 color: primary.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(
-                _getIcon(),
-                color: primary,
-                size: size * 0.5,
-              ),
+              child: Icon(_getIcon(), color: primary, size: size * 0.5),
             );
           },
         ),
@@ -50,11 +46,7 @@ class AlbumArt extends StatelessWidget {
         color: primary.withOpacity(0.15),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Icon(
-        _getIcon(),
-        color: primary,
-        size: size * 0.5,
-      ),
+      child: Icon(_getIcon(), color: primary, size: size * 0.5),
     );
   }
 

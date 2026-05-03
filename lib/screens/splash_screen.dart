@@ -4,6 +4,8 @@ import 'dart:async';
 
 import 'home_screen.dart';
 import 'login_screen.dart';
+import 'main_screen.dart';
+import 'package:mad_project2/theme.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -20,18 +22,18 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _navigate() async {
-    // Brief splash delay for branding
     await Future.delayed(const Duration(seconds: 5));
 
     if (!mounted) return;
 
-    // Route based on auth state
     FirebaseAuth.instance.authStateChanges().first.then((user) {
       if (!mounted) return;
+      // Navigate directly to MainScreen if logged in, not HomeScreen
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => user != null ? const HomeScreen() : const LoginScreen(),
+          builder: (_) =>
+              user != null ? const MainScreen() : const LoginScreen(),
         ),
       );
     });

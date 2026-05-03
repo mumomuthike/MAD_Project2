@@ -2,330 +2,191 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'login_screen.dart';
-import '../models/UserProfile.dart';
+import '../services/spotify_service.dart';
+import '../theme.dart';
 
-// ProfileScreen — view/edit profile, view/edit settings, and view stats
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  final VoidCallback? onLeaveSession;
+
+  const ProfileScreen({super.key, this.onLeaveSession});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Re-read user after edits so the UI reflects the latest display name.
-  User? get _user => FirebaseAuth.instance.currentUser;
+  final SpotifyService _spotifyService = SpotifyService();
+  bool _isConnecting = false;
+  bool _isSpotifyConnected = false;
+  String? _spotifyUserName;
 
-  String get _displayName =>
-      _user?.displayName?.isNotEmpty == true ? _user!.displayName! : 'Anonymous';
-
-  String get _email => _user?.email ?? '';
-
-  Future<void> _signOut() async {
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (_) => false,
-    );
+  @override
+  void initState() {
+    super.initState();
+    _checkSpotifyConnection();
   }
 
-  void _showEditName() {
-    final ctrl = TextEditingController(text: _displayName);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: const Text('Edit Display Name',
-            style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(hintText: 'Display name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final name = ctrl.text.trim();
-              if (name.isNotEmpty) {
-                await FirebaseAuth.instance.currentUser
-                    ?.updateDisplayName(name);
-
-                // Also update display name in Firestore user document
-                final userId = FirebaseAuth.instance.currentUser?.uid;
-                if (userId != null) {
-                  await FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(userId)
-                      .update({'displayName': name});
-                }
-              }
-              if (mounted) {
-                setState(() {}); // refresh displayed name
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Stream<UserProfile> _getUserProfile() {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) {
-      return Stream.value(UserProfile(
-        uid: '',
-        email: '',
-        displayName: '',
-        createdAt: DateTime.now(),
-      ));
+  Future<void> _checkSpotifyConnection() async {
+    final connected = await _spotifyService.isConnected();
+    if (mounted) {
+      setState(() {
+        _isSpotifyConnected = connected;
+      });
     }
+  }
 
-    return FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .snapshots()
-        .map((doc) {
-      if (doc.exists) {
-        return UserProfile.fromDoc(doc);
-      } else {
-        // Return default profile if doesn't exist yet
-        return UserProfile(
-          uid: userId,
-          email: _email,
-          displayName: _displayName,
-          createdAt: DateTime.now(),
+  Future<void> _connectSpotify() async {
+    setState(() {
+      _isConnecting = true;
+    });
+
+    try {
+      await _spotifyService.loginWithSpotify();
+      await _checkSpotifyConnection();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('SPOTIFY CONNECTED!'),
+            backgroundColor: AppTheme.primaryOrange,
+          ),
         );
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('CONNECTION FAILED: ${e.toString()}'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _disconnectSpotify() async {
+    await _spotifyService.disconnect();
+    setState(() {
+      _isSpotifyConnected = false;
     });
-  }
 
-  void _showChangePassword() {
-    // TODO: Implement password change functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Change password coming soon!')),
-    );
-  }
-
-  void _showNotifications() {
-    // TODO: Implement notifications settings
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Notification settings coming soon!')),
-    );
-  }
-
-  void _connectSpotify() {
-    // TODO: Implement Spotify connection
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Spotify connection coming soon!')),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('SPOTIFY DISCONNECTED'),
+          backgroundColor: Colors.grey,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profile'),
-        leading: const BackButton(),
-      ),
-      body: StreamBuilder<UserProfile>(
-        stream: _getUserProfile(),
-        builder: (context, snapshot) {
-          final stats = snapshot.data;
-
-          return ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-            children: [
-              // Avatar
-              Center(
-                child: Stack(
-                  alignment: Alignment.bottomRight,
-                  children: [
-                    CircleAvatar(
-                      radius: 52,
-                      backgroundColor: primary.withOpacity(0.2),
-                      child: Text(
-                        (_displayName.isNotEmpty ? _displayName[0] : '?')
-                            .toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 42,
-                          fontWeight: FontWeight.bold,
-                          color: primary,
-                        ),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: _showEditName,
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: primary,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: Theme.of(context).scaffoldBackgroundColor,
-                              width: 2),
-                        ),
-                        child: const Icon(Icons.edit_rounded,
-                            color: Colors.black, size: 14),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              // Name & email
-              Center(
-                child: Text(
-                  _displayName,
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Center(
-                child: Text(
-                  _email,
-                  style: const TextStyle(fontSize: 13, color: Colors.white60),
-                ),
-              ),
-              const SizedBox(height: 32),
-
-              // Stats row with real data from Firestore
-              if (snapshot.hasData && stats != null)
-                Row(
-                  children: [
-                    _StatBox(label: 'Sessions', value: stats.totalSessions.toString()),
-                    const SizedBox(width: 12),
-                    _StatBox(label: 'Songs Added', value: stats.totalSongsAdded.toString()),
-                    const SizedBox(width: 12),
-                    _StatBox(label: 'Votes Cast', value: stats.totalVotesCast.toString()),
-                  ],
-                )
-              else if (snapshot.hasError)
-                Row(
-                  children: [
-                    _StatBox(label: 'Sessions', value: '--'),
-                    const SizedBox(width: 12),
-                    _StatBox(label: 'Songs Added', value: '--'),
-                    const SizedBox(width: 12),
-                    _StatBox(label: 'Votes Cast', value: '--'),
-                  ],
-                )
-              else
-                const Row(
-                  children: [
-                    _StatBox(label: 'Sessions', value: '...'),
-                    SizedBox(width: 12),
-                    _StatBox(label: 'Songs Added', value: '...'),
-                    SizedBox(width: 12),
-                    _StatBox(label: 'Votes Cast', value: '...'),
-                  ],
-                ),
-              const SizedBox(height: 28),
-
-              // Settings section
-              _SectionLabel(label: 'Account'),
-              const SizedBox(height: 10),
-              _ProfileTile(
-                icon: Icons.edit_outlined,
-                label: 'Edit Display Name',
-                onTap: _showEditName,
-              ),
-              _ProfileTile(
-                icon: Icons.lock_outline_rounded,
-                label: 'Change Password',
-                onTap: _showChangePassword,
-              ),
-              const SizedBox(height: 20),
-
-              _SectionLabel(label: 'App'),
-              const SizedBox(height: 10),
-              _ProfileTile(
-                icon: Icons.notifications_outlined,
-                label: 'Notifications',
-                onTap: _showNotifications,
-              ),
-              _ProfileTile(
-                icon: Icons.music_note_outlined,
-                label: 'Connect Spotify',
-                onTap: _connectSpotify,
-              ),
-              // Removed "My Stats" button as it's redundant with stats above
-              const SizedBox(height: 20),
-
-              _SectionLabel(label: 'Session'),
-              const SizedBox(height: 10),
-              _ProfileTile(
-                icon: Icons.logout_rounded,
-                label: 'Sign Out',
-                labelColor: Theme.of(context).colorScheme.error,
-                onTap: _signOut,
-              ),
-              const SizedBox(height: 24),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-// Helpers
-class _SectionLabel extends StatelessWidget {
-  final String label;
-  const _SectionLabel({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      label.toUpperCase(),
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.bold,
-        color: Colors.white60,
-        letterSpacing: 1.4,
-      ),
-    );
-  }
-}
-
-class _StatBox extends StatelessWidget {
-  final String label;
-  final String value;
-  const _StatBox({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white12),
-        ),
+      backgroundColor: Colors.transparent,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            Text(value,
-                style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: primary)),
+            // Avatar with glow
+            Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryOrange.withOpacity(0.3),
+                    blurRadius: 20,
+                    spreadRadius: 4,
+                  ),
+                ],
+              ),
+              child: CircleAvatar(
+                radius: 50,
+                backgroundColor: AppTheme.primaryOrange.withOpacity(0.2),
+                child: Text(
+                  (user?.displayName?.isNotEmpty == true
+                          ? user!.displayName![0]
+                          : user?.email?[0] ?? '?')
+                      .toUpperCase(),
+                  style: TextStyle(fontSize: 40, color: AppTheme.primaryOrange),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Name
+            Text(
+              (user?.displayName ??
+                      user?.email?.split('@').first ??
+                      'ANONYMOUS')
+                  .toUpperCase(),
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.5,
+                color: Colors.white,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text(label,
-                style: const TextStyle(fontSize: 11, color: Colors.white60)),
+
+            // Email
+            Text(
+              user?.email?.toUpperCase() ?? '',
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white60,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Spotify Connect Button (WORKING VERSION)
+            _SpotifyConnectButton(
+              isConnecting: _isConnecting,
+              isConnected: _isSpotifyConnected,
+              spotifyUserName: _spotifyUserName,
+              onConnect: _connectSpotify,
+              onDisconnect: _disconnectSpotify,
+            ),
+            const SizedBox(height: 24),
+
+            // Session History
+            const _SessionHistory(),
+            const SizedBox(height: 16),
+
+            // Sign Out Button
+            ElevatedButton(
+              onPressed: () async {
+                widget.onLeaveSession?.call();
+                await FirebaseAuth.instance.signOut();
+                await _spotifyService.disconnect();
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (route) => false,
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accentRed,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 48),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              child: const Text('SIGN OUT'),
+            ),
           ],
         ),
       ),
@@ -333,44 +194,288 @@ class _StatBox extends StatelessWidget {
   }
 }
 
-class _ProfileTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color? labelColor;
-  final VoidCallback onTap;
+class _SpotifyConnectButton extends StatelessWidget {
+  final bool isConnecting;
+  final bool isConnected;
+  final String? spotifyUserName;
+  final VoidCallback onConnect;
+  final VoidCallback onDisconnect;
 
-  const _ProfileTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.labelColor,
+  const _SpotifyConnectButton({
+    required this.isConnecting,
+    required this.isConnected,
+    required this.spotifyUserName,
+    required this.onConnect,
+    required this.onDisconnect,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = labelColor ?? Colors.white;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+    return GestureDetector(
+      onTap: isConnecting ? null : (isConnected ? onDisconnect : onConnect),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white12),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isConnected
+                ? [
+                    AppTheme.primaryOrange.withOpacity(0.15),
+                    AppTheme.primaryPink.withOpacity(0.05),
+                  ]
+                : [AppTheme.surfaceDark, AppTheme.surfaceDark],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isConnected ? AppTheme.primaryOrange : Colors.white12,
+            width: isConnected ? 1.5 : 1,
+          ),
+          boxShadow: isConnected
+              ? [
+                  BoxShadow(
+                    color: AppTheme.primaryOrange.withOpacity(0.2),
+                    blurRadius: 12,
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 14),
+            // Icon with gradient background
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                gradient: isConnected ? AppGradients.primaryGlow : null,
+                color: isConnected ? null : AppTheme.surfaceDark,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: isConnecting
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppTheme.primaryOrange,
+                      ),
+                    )
+                  : Icon(
+                      isConnected
+                          ? Icons.check_circle_rounded
+                          : Icons.music_note_rounded,
+                      color: isConnected
+                          ? Colors.black
+                          : AppTheme.primaryOrange,
+                      size: 24,
+                    ),
+            ),
+            const SizedBox(width: 16),
+
+            // Text content
             Expanded(
-                child: Text(label,
-                    style: TextStyle(color: color, fontSize: 14))),
-            Icon(Icons.chevron_right_rounded, color: Colors.white54, size: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isConnected ? 'SPOTIFY CONNECTED' : 'CONNECT SPOTIFY',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    isConnected
+                        ? (spotifyUserName?.toUpperCase() ?? 'READY TO VIBE')
+                        : 'GET PERSONALIZED RECOMMENDATIONS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 0.5,
+                      color: isConnected
+                          ? AppTheme.primaryOrange
+                          : Colors.white60,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Action button text
+            Text(
+              isConnected ? 'DISCONNECT' : 'CONNECT →',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+                color: isConnected ? AppTheme.primaryOrange : Colors.white,
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+}
+
+class _SessionHistory extends StatelessWidget {
+  const _SessionHistory();
+
+  @override
+  Widget build(BuildContext context) {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+
+    if (userId == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'RECENT SESSIONS',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
+            color: Colors.white60,
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('sessions')
+              .where('memberUids', arrayContains: userId)
+              .orderBy('createdAt', descending: true)
+              .limit(5)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final sessions = snapshot.data!.docs;
+
+            if (sessions.isEmpty) {
+              return Container(
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceDark,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: const Center(
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.history_rounded,
+                        size: 48,
+                        color: Colors.white38,
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        'NO SESSIONS YET',
+                        style: TextStyle(color: Colors.white60),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            return Column(
+              children: sessions.map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final name = data['name'] ?? 'Untitled';
+                final isActive = data['isActive'] ?? false;
+                final createdAt =
+                    (data['createdAt'] as Timestamp?)?.toDate() ??
+                    DateTime.now();
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceDark,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: isActive ? Colors.green : Colors.grey,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name.toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _formatDate(createdAt),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.white60,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isActive
+                              ? Colors.green.withOpacity(0.15)
+                              : Colors.grey.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isActive ? 'ACTIVE' : 'ENDED',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.5,
+                            color: isActive ? Colors.green : Colors.grey,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+
+    if (diff.inDays > 30) return '${(diff.inDays / 30).floor()} MONTHS AGO';
+    if (diff.inDays > 7) return '${(diff.inDays / 7).floor()} WEEKS AGO';
+    if (diff.inDays > 0) return '${diff.inDays} DAYS AGO';
+    if (diff.inHours > 0) return '${diff.inHours} HOURS AGO';
+    return 'JUST NOW';
   }
 }

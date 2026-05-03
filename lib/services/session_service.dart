@@ -36,9 +36,7 @@ class SessionService {
       final userDoc = await userRef.get();
 
       if (userDoc.exists) {
-        await userRef.update({
-          'totalSessions': FieldValue.increment(1)
-        });
+        await userRef.update({'totalSessions': FieldValue.increment(1)});
       } else {
         // Create user document if it doesn't exist
         await userRef.set({
@@ -86,7 +84,7 @@ class SessionService {
       if (!session.memberUids.contains(user.uid)) {
         print('Adding user ${user.uid} to session members');
         await query.docs.first.reference.update({
-          'memberUids': FieldValue.arrayUnion([user.uid])
+          'memberUids': FieldValue.arrayUnion([user.uid]),
         });
 
         // Increment user's total sessions count for joining a session
@@ -94,9 +92,7 @@ class SessionService {
         final userDoc = await userRef.get();
 
         if (userDoc.exists) {
-          await userRef.update({
-            'totalSessions': FieldValue.increment(1)
-          });
+          await userRef.update({'totalSessions': FieldValue.increment(1)});
         } else {
           // Create user document if it doesn't exist
           await userRef.set({
@@ -127,10 +123,9 @@ class SessionService {
 
   Future<void> endSession(String sessionId) async {
     try {
-      await _firestore
-          .collection('sessions')
-          .doc(sessionId)
-          .update({'isActive': false});
+      await _firestore.collection('sessions').doc(sessionId).update({
+        'isActive': false,
+      });
       print('Session $sessionId ended');
     } catch (e) {
       print('Error ending session: $e');
